@@ -8,6 +8,8 @@ from nltk.stem import PorterStemmer
 from nltk.text import Text
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+from nltk import ne_chunk
+from nltk.chunk import conlltags2tree, tree2conlltags
 
 filteredContent = {}
 lemmatizer = WordNetLemmatizer()
@@ -75,7 +77,8 @@ def jsonToText(object):
     j = 0
     text = []
     while j < lengthOfJson:
-        # Extracting valid sentences and text data into 'text' for each Data Point (JSON Object)
+        # Extracting valid sentences and text data into 'text' for each Data
+        # Point (JSON Object)
         nameValue = dataPointJson[j].get("name")
         descriptionValue = dataPointJson[j].get("description")
         definitionValue = dataPointJson[j].get("definition")
@@ -119,29 +122,36 @@ def regexExtractor(text):
         numeralRegex = re.compile(r' [0-9]+ ')
         postNumeralRegex = re.sub(numeralRegex, ' ', line)
         if len(numeralRegex.findall(line)) > 0:
-            excludedNumerals.add(numeralRegex.findall(line))
+            excludedNumerals.update(numeralRegex.findall(line))
     # print("Excluded Numerals = ", excludedNumerals)
 
         notAlphanumericRegex = re.compile(r'[^A-Z0-9a-z-\. ]')
-        postNotAlphanumericRegex = re.sub(notAlphanumericRegex, ' ', postNumeralRegex)
-        print(postNumeralRegex)
+        postNotAlphanumericRegex = re.sub(
+            notAlphanumericRegex, ' ', postNumeralRegex)
+        # print(notAlphanumericRegex.findall(postNumeralRegex))
         if len(notAlphanumericRegex.findall(postNumeralRegex)) > 0:
-            excludedNotAlphanumeric.add(notAlphanumericRegex.findall(postNumeralRegex))
+            excludedNotAlphanumeric.update(
+                notAlphanumericRegex.findall(postNumeralRegex))
 
     # print("Excluded Non Alphanumeric content = ", excludedNotAlphanumeric)
 
         seeMissingRegex = re.compile(r' -')
-        postSeeMissingRegex = re.sub(seeMissingRegex, ' ', postNotAlphanumericRegex)
+        postSeeMissingRegex = re.sub(
+            seeMissingRegex, ' ', postNotAlphanumericRegex)
         if len(seeMissingRegex.findall(postNotAlphanumericRegex)) > 0:
-            excludedSeeMissingHyphenated.add(seeMissingRegex.findall(postNotAlphanumericRegex))
-    # print("Excluded See Missing Hyphenations = ", excludedSeeMissingHyphenated)
+            excludedSeeMissingHyphenated.update(
+                seeMissingRegex.findall(postNotAlphanumericRegex))
+    # print("Excluded See Missing Hyphenations = ",
+    # excludedSeeMissingHyphenated)
 
         sawMissingRegex = re.compile(r'- ')
         postSawMissingRegex = re.sub(sawMissingRegex, ' ', postSeeMissingRegex)
         if len(sawMissingRegex.findall(postSeeMissingRegex)) > 0:
-            excludedSawMissingHyphenated.add(sawMissingRegex.findall(postSeeMissingRegex))
+            excludedSawMissingHyphenated.update(
+                sawMissingRegex.findall(postSeeMissingRegex))
 
-    # print("Excluded Saw Missing Hyphenations = ", excludedSawMissingHyphenated)
+    # print("Excluded Saw Missing Hyphenations = ",
+    # excludedSawMissingHyphenated)
 
         cleansedText.append(re.sub('\s+', ' ', postSawMissingRegex))
     # cleansedText = re.sub('\s+', ' ', postSawMissingRegex)
@@ -149,8 +159,10 @@ def regexExtractor(text):
     # print("VALUE = ", cleansedText)
     filteredContent['excludedNumerals'] = excludedNumerals
     filteredContent['excludedNotAlphanumeric'] = excludedNotAlphanumeric
-    filteredContent['excludedSeeMissingHyphenated'] = excludedSeeMissingHyphenated
-    filteredContent['excludedSawMissingHyphenated'] = excludedSawMissingHyphenated
+    filteredContent[
+        'excludedSeeMissingHyphenated'] = excludedSeeMissingHyphenated
+    filteredContent[
+        'excludedSawMissingHyphenated'] = excludedSawMissingHyphenated
     cleanRegex = ' '.join(cleansedText)
     filteredContent['cleansedText'] = cleanRegex
     return filteredContent
@@ -168,6 +180,26 @@ def removeDuplicate(dpVocab):
     return dpVocab
 
 
+def splitString(joinedString):
+    fo = re.compile(r'[A-Z]{2,}(?![a-z])|[A-Z][a-z]+')
+    fi = fo.findall(joinedString)
+    result = ''
+    for var in fi:
+        result += var + ' '
+    return result
+
+
+def namedEntityRecognition(pos):
+    chunked_token = ne_chunk(pos)
+    named_entity = tree2conlltags(chunked_token)
+    return named_entity
+
+
+def stopWordsRemove(word):
+    if word.lower() in stopwords.words('english') and re.search(r'no+', word.lower()) is None:
+        return word
+
+
 def preProcessVocab(clean_text):
     nounList = ["NN", "NNS"]
     adverbList = ["RB", "RBR", "RBS"]
@@ -183,40 +215,43 @@ def preProcessVocab(clean_text):
     sentences = nltk.sent_tokenize(clean_text)
     j = 0
     for sentence in sentences:
-
+        #sentenceNew = splitString(sentence)
         tokenList = nltk.word_tokenize(sentence)
-
         partOfSpeech = nltk.pos_tag(tokenList)
-
+        ne_token = namedEntityRecognition(partOfSpeech)
+        #print(ne_token)
+        # print(partOfSpeech)
         k = 0
         for token in tokenList:
-            word = token
-            if word.lower() in stopwords.words('english') and re.search(r'no+', word.lower()) is None:
+            stpWord = stopWordsRemove(token)
+
+            if stpWord is not None:
+                stopWordsList.add(stpWord)
                 k += 1
-                stopWordsList.add(word)
                 continue
 
             isNamedEntity = False
 
             identifier = str(j + 1) + "." + str(k + 1)
 
-            stemValue = stemmer.stem(word)
-            posValue = partOfSpeech[k][1]
+            stemValue = stemmer.stem(token)
+            posValue = ne_token[k][1]
+
             if posValue in nounList:
-                lemmaValue = lemmatizeWord(word, 'n')
+                lemmaValue = lemmatizeWord(token, 'n')
             elif posValue in adverbList:
-                lemmaValue = lemmatizeWord(word, 'r')
+                lemmaValue = lemmatizeWord(token, 'r')
             elif posValue in adjectiveList:
-                lemmaValue = lemmatizeWord(word, 'a')
+                lemmaValue = lemmatizeWord(token, 'a')
             elif posValue in verbList:
-                lemmaValue = lemmatizeWord(word, 'v')
+                lemmaValue = lemmatizeWord(token, 'v')
             else:
-                lemmaValue = lemmatizer.lemmatize(word)
+                lemmaValue = lemmatizer.lemmatize(token)
             if posValue == 'NNP' or posValue == 'NNPS':
                 isNamedEntity = True
 
             vocabularyEntry['id'] = identifier
-            vocabularyEntry['word'] = word
+            vocabularyEntry['word'] = token
             vocabularyEntry['postag'] = posValue
             vocabularyEntry['lemma'] = lemmaValue
             vocabularyEntry['stem'] = stemValue
