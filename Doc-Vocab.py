@@ -3,6 +3,7 @@ import json
 import re
 import nltk
 import copy
+import string
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from nltk.text import Text
@@ -10,6 +11,12 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from nltk import ne_chunk
 from nltk.chunk import conlltags2tree, tree2conlltags
+import itertools
+from gensim.models import Phrases
+from gensim.models import Word2Vec
+from nltk.corpus import stopwords
+from collections import Counter
+import objectpath
 
 filteredContent = {}
 lemmatizer = WordNetLemmatizer()
@@ -73,39 +80,47 @@ def collocations(text):
 # Method 'jsonToText' to extract text values from the JSON Object
 def jsonToText(object):
     lengthOfJson = len(dataPointJson)
-    print(lengthOfJson)
     j = 0
     text = []
+    nameList = []
+    idList = []
+
     while j < lengthOfJson:
         # Extracting valid sentences and text data into 'text' for each Data
         # Point (JSON Object)
         nameValue = dataPointJson[j].get("name")
+        idValue = dataPointJson[j].get("id")
         descriptionValue = dataPointJson[j].get("description")
         definitionValue = dataPointJson[j].get("definition")
-
+        if idValue is not None and nameValue is not None:
+            nameList.append(dataPointJson[j].get("name"))
+            idList.append(dataPointJson[j].get("id"))
         if nameValue[-1:] != '.':
             nameValue += ". "
         if descriptionValue[-1:] != '.':
             descriptionValue += ". "
 
         # idValue = dataPointJson[j].get("id")
+        text.append(nameValue)
         text.append(descriptionValue)
-
         if definitionValue is not None:
             if definitionValue[-1:] != '.':
                 definitionValue += " . "
             text.append(definitionValue)
+
+        # nameNidDict['id'].append(dataPointJson[j].get("id"))
+        # nameNidDict['name'].append(dataPointJson[j].get("name"))
+
         j += 1
-    return text
+
+    return text, nameList, idList
 
 
 # Method 'dataPointTextExtractor' to import json content
 def jsonExtractor(filePath):
     source = open(filePath, 'r')
     jsonDataPoint = json.load(source)
-    dictDataPoint = {}
-    dictDataPoint = jsonDataPoint
-    return dictDataPoint
+    return jsonDataPoint
 
 # Method 'regexExtractor' to remove non-conforming patterns
 
@@ -215,11 +230,11 @@ def preProcessVocab(clean_text):
     sentences = nltk.sent_tokenize(clean_text)
     j = 0
     for sentence in sentences:
-        #sentenceNew = splitString(sentence)
+        # sentenceNew = splitString(sentence)
         tokenList = nltk.word_tokenize(sentence)
         partOfSpeech = nltk.pos_tag(tokenList)
         ne_token = namedEntityRecognition(partOfSpeech)
-        #print(ne_token)
+        # print(ne_token)
         # print(partOfSpeech)
         k = 0
         for token in tokenList:
@@ -257,11 +272,69 @@ def preProcessVocab(clean_text):
             vocabularyEntry['stem'] = stemValue
             vocabularyEntry['isnamedentity'] = isNamedEntity
 
-            # Creating Vocabulary Entry Object. We can further reduce the JSON Output by removing repeating JSON Objects, which is not implemented yet.
+            # Creating Vocabulary Entry Object. We can further reduce the JSON
+            # Output by removing repeating JSON Objects, which is not
+            # implemented yet.
             dpVocab.append(dict(vocabularyEntry))
             k += 1
         j += 1
     return dpVocab, stopWordsList
+
+
+def nameIndexing(outFile, nameList, idList):
+    dpVocabOutputJson = jsonExtractor(output_file)
+    # newText = regexExtractor(nameList)
+    # nameClean = newText.get('cleansedText')
+    # dpNameVocab, stopNameWordsList = preProcessVocab(nameClean)
+    tree = objectpath.Tree(dpVocabOutputJson)
+    if len(nameList) == len(idList):
+        j = 0
+        nameIndexDict = {}
+        while j < len(idList):
+            nameIndexDict['dp-id'] = idList[j]
+            nameIndexDict['original-phrase'] = nameList[j]
+            nameTokens = [word
+                          for word in nltk.word_tokenize(nameList[j])
+                          if word not in string.punctuation and word.lower() not in stopwords.words('english')]
+            idTokens = []
+            for name in nameTokens:
+                print(name, " , ")
+                result = tree.execute("$..*[@.word is " + name + "]")
+                for entry in result:
+                    print(entry["id"], " ++++ ")
+                    if entry["id"] is None:
+                        break
+                    idTokens.append(entry["id"])
+            nameIndexDict['encoded-phrase'] = idTokens
+
+            j += 1
+    return
+
+    # print(len(dpNameVocab))
+    # dictName = {dpNameVocab[i]: dpNameVocab[i + 1] for i in range(0, len(dpNameVocab), 2)}
+    # print(dictName["word"])
+    ###################################################
+    # bigram = Phrases()
+    # sentences = []
+    # for name in nameList:
+    #     sentence = [word
+    #                 for word in nltk.word_tokenize(name.lower())
+    #                 if word not in string.punctuation]
+    #     sentences.append(sentence)
+    #     bigram.add_vocab([sentence])
+    # print(list(bigram[sentences])[:5])
+    # bigram_model_counter = Counter()
+
+    # bigram_model = Word2Vec(bigram[sentences], size=100)
+
+    # for key in bigram_model.wv.vocab.keys():
+    #     if key not in stopwords.words("english"):
+    #         if len(key.split("_")) > 1:
+    #             bigram_model_counter[key] += bigram_model.wv.vocab[key].count
+
+    # for key, counts in bigram_model_counter.most_common(50):
+    #     print('{0: <20} {1}'.format(key, counts))
+    #############################################################
 
 
 if __name__ == '__main__':
@@ -278,7 +351,7 @@ if __name__ == '__main__':
 
     # Data Points info of Json content imported into 'dataPointJson'
     dataPointJson = jsonExtractor(input_file)
-    allText = jsonToText(dataPointJson)
+    allText, nameList, idList = jsonToText(dataPointJson)
     parsedOutput = regexExtractor(allText)
     clean = parsedOutput.get('cleansedText')
     dpVocab, stopWordsList = preProcessVocab(clean)
@@ -297,6 +370,8 @@ if __name__ == '__main__':
         outfile.write(str(filteredContent['excludedNotAlphanumeric']))
         outfile.write(str(filteredContent['excludedSawMissingHyphenated']))
         outfile.write(str(filteredContent['stopWords']))
+
+    nameIndexing(output_file, nameList, idList)
 
     # print("lemmatized = ", lemmatized)
     # print("POS = ", partOfSpeech)
